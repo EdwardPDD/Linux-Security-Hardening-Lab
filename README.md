@@ -1,4 +1,4 @@
-# Linux-Security-Hardening-Lab
+# Linux Security Hardening Lab
 
 ## Project Overview
 
@@ -12,6 +12,12 @@ A security audit was performed on the organization's Linux systems using Lynis. 
 
 The goal was to review the audit findings, determine the appropriate configuration changes, implement the fixes, and verify that the systems reached the required security state.
 
+### Initial Security State
+
+At the beginning of the challenge, all eight security checks were in an **Undesirable State**. These checks covered the Apache security controls and authentication hardening on Prod-Joomla, along with authentication hardening, Fail2Ban, and process accounting on Fileshare.
+
+![Initial challenge checks showing Undesirable State](screenshots/Screenshot%202026-10-01%20104553.png)
+
 ## Lab Environment
 
 - XP Cyber Range
@@ -24,7 +30,13 @@ The goal was to review the audit findings, determine the appropriate configurati
 - Fail2Ban
 - Process Accounting
 
- ## Security Objectives
+### Network Topology
+
+The lab environment separated the two target systems across different network segments. Prod-Joomla (`172.16.10.100`) was located in the screened subnet, while Fileshare (`172.16.30.100`) was located in the production subnet.
+
+![Lab Network Topology](screenshots/Screenshot%202026-10-01%20104723.png)
+
+## Security Objectives
 
 The Lynis audit identified several security recommendations across the Prod-Joomla and Fileshare servers. The main objectives of the lab were to:
 
@@ -49,6 +61,12 @@ The two systems did not have identical configurations, so some remediation steps
 
 ## Prod-Joomla Remediation
 
+### Lynis Audit Findings
+
+The Lynis audit identified several security recommendations for Prod-Joomla, including stronger password controls, additional Apache security protections, and Fail2Ban.
+
+![Prod-Joomla Lynis Audit Findings](screenshots/Screenshot%202026-10-01%20105340.png)
+
 ### Password Policy Hardening
 
 The Lynis audit identified weaknesses in the server's password configuration. I installed a PAM password-strength module and updated the password policy to require a minimum password length of 10 characters.
@@ -60,6 +78,10 @@ I also updated `/etc/login.defs` and changed the minimum password age from:
 to:
 
 `PASS_MIN_DAYS 3`
+
+The original configuration showed `PASS_MIN_DAYS` set to `0` before remediation.
+
+![Prod-Joomla original password aging configuration](screenshots/Screenshot%202026-10-01%20110623.png)
 
 The maximum password age was intentionally left unchanged based on the audit instructions.
 
@@ -77,7 +99,15 @@ The Prod-Joomla server also required additional protections for the Apache web s
 - `mod_qos` — additional controls against resource-exhaustion and Slowloris-style attacks
 - `mod_security` — web application firewall functionality for detecting malicious HTTP requests
 
+I installed the Apache QoS and ModSecurity modules using APT. The screenshot below shows `libapache2-mod-qos` successfully installed and enabled, followed by the installation of `libapache2-modsecurity`.
+
+![Prod-Joomla Apache security module installation](screenshots/Screenshot%202026-10-01%20111956.png)
+
 ### Fail2Ban
+
+Before installation, I used `apt search fail2ban` to verify that the Fail2Ban package was available in the configured repositories.
+
+![Prod-Joomla Fail2Ban package search](screenshots/Screenshot%202026-10-01%20112220.png)
 
 Fail2Ban was installed to provide additional protection against repeated authentication failures. The package monitors authentication activity and can temporarily block hosts responsible for repeated failed login attempts.
 
@@ -87,21 +117,25 @@ After completing the remediation, all five Prod-Joomla security checks reached t
 
 ## Fileshare Remediation
 
+### Lynis Audit Findings
+
+The Fileshare Lynis audit identified recommendations related to password strength, password aging, Fail2Ban, and process accounting.
+
+![Fileshare Lynis Audit Findings](screenshots/Screenshot%202026-10-01%20120329.png)
+
 ### Password Policy Hardening
 
 The Fileshare server required similar password-policy changes, but its PAM configuration was different from Prod-Joomla.
 
-I initially attempted to install Cracklib using:
+I initially attempted to install Cracklib using `sudo apt install libpam-cracklib`, but APT reported that the package had no installation candidate on Fileshare.
 
-`sudo apt install libpam-cracklib`
+![Fileshare Cracklib package unavailable](screenshots/Screenshot%202026-10-01%20120616.png)
 
-However, APT reported that `libpam-cracklib` had no installation candidate on this system. Instead of using Cracklib, I worked with the existing `pam_pwquality` module available on Fileshare.
+Since Cracklib was unavailable, I reviewed `/etc/pam.d/common-password` and confirmed that Fileshare was already configured to use `pam_pwquality` for password-strength checking.
 
-The PAM password configuration was located at:
+![Fileshare pam_pwquality configuration](screenshots/Screenshot%202026-10-01%20122216.png)
 
-`/etc/pam.d/common-password`
-
-The `pam_pwquality` configuration was used to enforce the required password-strength policy, including a minimum password length of 10 characters.
+I continued using the existing `pam_pwquality` module as the password-strength control on Fileshare.
 
 I also updated `/etc/login.defs` so the minimum password age was set to:
 
@@ -123,10 +157,44 @@ After completing the password-policy changes, installing Fail2Ban, and enabling 
 
 ## Troubleshooting
 
-One of the main challenges during the lab was that the two Linux servers did not support the same password-strength configuration.
+One of the main challenges during the lab was that the two Linux servers did not support the same password-strength configuration. On Prod-Joomla, the PAM configuration identified that `pam_pwquality` and Cracklib password-strength checking could not be enabled at the same time.
 
-On Prod-Joomla, I installed `libpam-cracklib` and configured Cracklib through `/etc/pam.d/common-password`. During the configuration process, I found that both Cracklib and `pam_pwquality` were present, which created overlapping password-strength configurations. I removed the unnecessary `pam_pwquality` packages and configured the system to use Cracklib.
+![Prod-Joomla incompatible PAM profiles](screenshots/Screenshot%202026-10-01%20113515.png)
 
-On Fileshare, attempting to install `libpam-cracklib` returned an error stating that the package had no installation candidate. I reviewed the existing PAM configuration and found that Fileshare already used `pam_pwquality`. Instead of forcing the same configuration used on Prod-Joomla, I modified the existing `pam_pwquality` configuration to meet the password-policy requirements.
+I checked the installed PAM packages and confirmed that both Cracklib and `pam_pwquality` were present on Prod-Joomla.
 
-This required using different PAM implementations on each server while still achieving the same security objective.
+![Prod-Joomla installed PAM packages](screenshots/Screenshot%202026-10-01%20113715.png)
+
+To resolve the conflict, I removed the `pam_pwquality` packages from Prod-Joomla and verified that Cracklib remained installed. I then located the PAM password configuration file at `/etc/pam.d/common-password`.
+
+![Prod-Joomla PAM conflict resolution](screenshots/Screenshot%202026-10-01%20114918.png)
+
+The final PAM configuration used Cracklib with `retry=3`, `minlen=10`, and `difok=3` to enforce the password-strength requirements.
+
+![Prod-Joomla final Cracklib password policy](screenshots/Screenshot%202026-10-01%20115643.png)
+
+Fileshare required a different approach because Cracklib was unavailable from its configured repositories. Rather than forcing the same configuration on both servers, I used the PAM password-strength module available on each system while still meeting the required security objectives.
+
+## Final Results
+
+After completing the remediation on both servers, I ran the challenge checks to verify the configurations. All eight security checks reached the **Desired State**.
+
+![All security checks at Desired State](screenshots/Screenshot%202026-10-01%20122955.png)
+
+The final submission confirmed a **Full Check Pass (8/8)** for the Engineer's Audit Advice challenge.
+
+![Final challenge submission - 8 of 8](screenshots/Screenshot%202026-10-01%20123825.png)
+
+## Skills Demonstrated
+
+- Linux security hardening
+- Lynis audit remediation
+- PAM password policy configuration
+- Linux password aging controls
+- Apache security hardening
+- Fail2Ban
+- Process accounting
+- Linux package management with APT
+- Linux configuration file management
+- Troubleshooting PAM module conflicts
+- Security control validation
